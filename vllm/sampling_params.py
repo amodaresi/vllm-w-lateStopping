@@ -111,6 +111,8 @@ class SamplingParams:
         max_tokens: Optional[int] = 16,
         logprobs: Optional[int] = None,
         prompt_logprobs: Optional[int] = None,
+        special_token_ignore: Optional[int] = None,
+        special_token_stop_after: Optional[int] = 5,
         skip_special_tokens: bool = True,
         spaces_between_special_tokens: bool = True,
         logits_processors: Optional[List[LogitsProcessor]] = None,
@@ -127,6 +129,8 @@ class SamplingParams:
         self.use_beam_search = use_beam_search
         self.length_penalty = length_penalty
         self.early_stopping = early_stopping
+        self.special_token_ignore = special_token_ignore
+        self.special_token_stop_after = special_token_stop_after
         if stop is None:
             self.stop = []
         elif isinstance(stop, str):

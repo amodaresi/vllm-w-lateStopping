@@ -4,6 +4,8 @@ from typing import Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
+import numpy as np
+
 from vllm.model_executor.parallel_utils.communication_op import (
     tensor_model_parallel_gather)
 from vllm.model_executor.sampling_metadata import SamplingMetadata, SamplingTensors
@@ -238,6 +240,10 @@ def _apply_min_p(
 def _greedy_sample(
     selected_seq_groups: List[Tuple[List[int], SamplingParams]],
     samples: torch.Tensor,
+    seq_data: Dict[int, SequenceData],
+    logprobs: Optional[torch.Tensor] = None,
+    ending_token_id: int = None,
+    buffer_stop: int = -1,
 ) -> List[Tuple[List[int], List[int]]]:
     samples = samples.tolist()
     sample_idx = 0
@@ -247,8 +253,26 @@ def _greedy_sample(
         num_parent_seqs = len(seq_ids)
         assert num_parent_seqs == 1, (
             "Greedy sampling should have only one seq.")
+        seq_id = seq_ids[0]
         parent_ids = list(range(num_parent_seqs))
-        next_token_ids = [samples[sample_idx]]
+
+        if ending_token_id is not None:
+            next_token_ids = [samples[sample_idx][-1]]
+            if next_token_ids[0] == ending_token_id:
+                cumulative_logprob = (seq_data[seq_id].cumulative_logprob + logprobs[sample_idx][ending_token_id]) / (len(seq_data[seq_id].output_token_ids) + 1)
+                cumulative_logprob = cumulative_logprob.cpu().numpy()
+                cumulative_logprobs = list(seq_data[seq_id].cutting_points.values())
+
+                best_cumlogprob_arg = 0
+                if len(cumulative_logprobs) > 0:
+                    best_cumlogprob_arg = int(np.argmax(cumulative_logprobs))
+
+                if len(seq_data[seq_id].cutting_points) < buffer_stop or best_cumlogprob_arg > len(cumulative_logprobs) - buffer_stop:
+                    seq_data[seq_id].cutting_points[len(seq_data[seq_id].output_token_ids)] = cumulative_logprob
+                    next_token_ids = [samples[sample_idx][-2]]
+        else:
+            next_token_ids = [samples[sample_idx]]
+
         results.append((next_token_ids, parent_ids))
         sample_idx += num_parent_seqs
     return results
@@ -384,7 +408,13 @@ def _sample(
         sample_metadata[sampling_type] = (seq_group_ids, seq_groups,
                                           is_prompts, sample_indices)
         if sampling_type == SamplingType.GREEDY:
-            greedy_samples = torch.argmax(logprobs[sample_indices], dim=-1)
+            if seq_groups[0][1].special_token_ignore is not None:
+                greedy_samples = torch.argsort(logprobs[sample_indices], dim=-1)[:, -2:]
+                greedy_logprobs = logprobs[sample_indices]
+            else:
+                greedy_samples = torch.argmax(logprobs[sample_indices], dim=-1)
+                greedy_logprobs = None
+            
         elif sampling_type == SamplingType.RANDOM:
             max_best_of = 1
             for seq_group, is_prompt in zip(seq_groups, is_prompts):
@@ -406,7 +436,13 @@ def _sample(
         seq_group_ids, seq_groups, is_prompts, sample_indices = sample_metadata[
             sampling_type]
         if sampling_type == SamplingType.GREEDY:
-            sample_results = _greedy_sample(seq_groups, greedy_samples)
+            sample_results = _greedy_sample(seq_groups, 
+                                            greedy_samples, 
+                                            sampling_metadata.seq_data, 
+                                            greedy_logprobs, 
+                                            ending_token_id=seq_groups[0][1].special_token_ignore,
+                                            buffer_stop=seq_groups[0][1].special_token_stop_after)
+            
         elif sampling_type == SamplingType.RANDOM:
             sample_results = _random_sample(seq_groups, is_prompts,
                                             multinomial_samples)

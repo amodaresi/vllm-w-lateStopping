@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from vllm.sequence import (PromptLogprobs, SampleLogprobs, SequenceGroup,
                            SequenceStatus)
@@ -26,6 +26,7 @@ class CompletionOutput:
         text: str,
         token_ids: List[int],
         cumulative_logprob: float,
+        cutting_points: Dict[int, Any],
         logprobs: Optional[SampleLogprobs],
         finish_reason: Optional[str] = None,
         lora_request: Optional[LoRARequest] = None,
@@ -34,6 +35,7 @@ class CompletionOutput:
         self.text = text
         self.token_ids = token_ids
         self.cumulative_logprob = cumulative_logprob
+        self.cutting_points = cutting_points
         self.logprobs = logprobs
         self.finish_reason = finish_reason
         self.lora_request = lora_request
@@ -106,7 +108,7 @@ class RequestOutput:
             finshed_reason = SequenceStatus.get_finished_reason(seq.status)
             output = CompletionOutput(seqs.index(seq), seq.output_text,
                                       seq.get_output_token_ids(),
-                                      seq.get_cumulative_logprob(), logprobs,
+                                      seq.get_cumulative_logprob(), seq.get_cutting_points(), logprobs,
                                       finshed_reason)
             outputs.append(output)
 

@@ -68,6 +68,7 @@ class SequenceData:
         self.prompt_token_ids = prompt_token_ids
         self.output_token_ids: List[int] = []
         self.cumulative_logprob = 0.0
+        self.cutting_points = {}
 
     def append_token_id(self, token_id: int, logprob: float) -> None:
         self.output_token_ids.append(token_id)
@@ -194,6 +195,9 @@ class Sequence:
 
     def get_cumulative_logprob(self) -> float:
         return self.data.cumulative_logprob
+    
+    def get_cutting_points(self):
+        return self.data.cutting_points
 
     def get_beam_search_score(self,
                               length_penalty: float = 1.0,
